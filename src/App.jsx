@@ -307,10 +307,33 @@ function MedPage({ db, setDb }) {
   const th = useTh();
   const todayKey = new Date().toLocaleDateString("ja-JP");
   const todayLog = (db.medLog || {})[todayKey] || {};
+
   const tog = k => {
-    const next = { ...todayLog, [k]: !todayLog[k] };
-    setDb(prev => ({ ...prev, medLog: { ...(prev.medLog || {}), [todayKey]: next } }));
+    const newVal = !todayLog[k];
+    const next = { ...todayLog, [k]: newVal };
+    // medLog に保存
+    setDb(prev => {
+      const updatedMedLog = { ...(prev.medLog || {}), [todayKey]: next };
+      // recs にも服薬イベントとして記録
+      const now = new Date();
+      const [medId, timing] = k.split("-");
+      const medName = medId === "pi" ? "DSピモハート" : "利尿剤";
+      const label = `${medName}（${timing === "am" ? "朝" : "晩"}）${newVal ? "服薬" : "取消"}`;
+      const newRec = {
+        ts: now.getTime(),
+        date: now.toLocaleDateString("ja-JP"),
+        time: now.toLocaleTimeString("ja-JP",{hour:"2-digit",minute:"2-digit"}),
+        srr: null, water: "", uAmt: "", uCol: "",
+        medEvent: label,
+      };
+      return {
+        ...prev,
+        medLog: updatedMedLog,
+        recs: [newRec, ...prev.recs].slice(0, MAX_RECS),
+      };
+    });
   };
+
   return (
     <div style={{ padding:12 }}>
       <Card>
@@ -318,7 +341,7 @@ function MedPage({ db, setDb }) {
         <CB>
           <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
             {[
-              { id:"fc", name:"フォルテコールプラス" },
+              { id:"pi", name:"DSピモハート" },
               { id:"di", name:"利尿剤" },
             ].map(m => (
               <div key={m.id} style={{ background:th.c4, border:`1.5px solid ${th.bdr}`, borderRadius:12,
@@ -342,7 +365,7 @@ function MedPage({ db, setDb }) {
             ))}
           </div>
           <div style={{ marginTop:12, fontSize:11, color:th.hint, textAlign:"right" }}>
-            ✓ のついたお薬は自動保存されます
+            ✓ のついたお薬は自動保存・履歴に記録されます
           </div>
         </CB>
       </Card>
@@ -593,7 +616,12 @@ footer{margin-top:24px;font-size:10px;color:#7AB2B2;border-top:1px solid #C2DDE2
                     justifyContent:"space-between", padding:"10px 0", borderBottom:`1px solid ${th.bdr}` }}>
                     <div>
                       <div style={{ fontSize:12, color:th.hint }}>{r.date} {r.time}{r.water?` | 飲水 ${r.water}ml`:""}</div>
-                      <div style={{ fontSize:11, color:th.hint }}>{r.uAmt||""}{r.uCol?` / ${r.uCol}`:""}</div>
+                      <div style={{ fontSize:11, color:th.hint }}>
+                        {r.medEvent
+                          ? <span style={{ color:C.sfT, fontWeight:500 }}>💊 {r.medEvent}</span>
+                          : <>{r.uAmt||""}{r.uCol?` / ${r.uCol}`:""}</>
+                        }
+                      </div>
                     </div>
                     <div style={{ display:"flex", alignItems:"center", gap:7 }}>
                       {r.srr!=null ? <span style={{ fontSize:15, fontWeight:500, color:th.tx }}>{r.srr}回</span>
@@ -663,39 +691,119 @@ function HospPage({ db, setDb }) {
 // ── 通知ページ ────────────────────────────────────────────────────
 function NtfPage({ db, setDb }) {
   const th = useTh();
-  const [cfg, setCfg] = useState({ ...db.ntf });
-  const [msg, setMsg] = useState("");
-  const ntfRef = useRef([]);
+  const [cfg, setCfg]     = useState({ ...db.ntf });
+  const [msg, setMsg]     = useState("");
+  const [ntfSupport, setNtfSupport] = useState("checking");
+  const pollRef = useRef(null);
+  const firedRef = useRef(new Set());
+
+  // 通知サポートチェック
+  useEffect(() => {
+    if (!("Notification" in window)) { setNtfSupport("unsupported"); return; }
+    if (Notification.permission === "granted") setNtfSupport("granted");
+    else if (Notification.permission === "denied") setNtfSupport("denied");
+    else setNtfSupport("prompt");
+  }, []);
+
+  const requestPerm = async () => {
+    const p = await Notification.requestPermission();
+    setNtfSupport(p === "granted" ? "granted" : p === "denied" ? "denied" : "prompt");
+  };
+
+  // setInterval で毎分現在時刻をチェックして発火（PWA必須）
+  const startPolling = useCallback((c) => {
+    if (pollRef.current) clearInterval(pollRef.current);
+    firedRef.current = new Set();
+    pollRef.current = setInterval(() => {
+      if (Notification.permission !== "granted") return;
+      const now = new Date();
+      const hhmm = `${String(now.getHours()).padStart(2,"0")}:${String(now.getMinutes()).padStart(2,"0")}`;
+      const dayKey = now.toLocaleDateString("ja-JP");
+      const ENTRIES = [
+        { k:"fam", ok:"fam_on", time:c.fam, lb:"DSピモハート 朝のお薬の時間です" },
+        { k:"fpm", ok:"fpm_on", time:c.fpm, lb:"DSピモハート 晩のお薬の時間です" },
+        { k:"dam", ok:"dam_on", time:c.dam, lb:"利尿剤 朝のお薬の時間です" },
+        { k:"dpm", ok:"dpm_on", time:c.dpm, lb:"利尿剤 晩のお薬の時間です" },
+      ];
+      ENTRIES.forEach(e => {
+        if (!c[e.ok] || !e.time) return;
+        const fireKey = `${dayKey}-${e.k}`;
+        if (e.time === hhmm && !firedRef.current.has(fireKey)) {
+          firedRef.current.add(fireKey);
+          new Notification("🐾 お薬リマインダー", { body: e.lb, icon:"/icon-192.png" });
+        }
+      });
+    }, 30000); // 30秒ごとにチェック
+  }, []);
+
+  useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current); }, []);
+
+  const save = () => {
+    setDb(p => ({ ...p, ntf:cfg }));
+    if (Notification.permission === "granted") startPolling(cfg);
+    setMsg("保存しました。通知は有効です。");
+    setTimeout(() => setMsg(""), 3000);
+  };
+
   const ENTRIES = [
-    { k:"fam", ok:"fam_on", lb:"フォルテコールプラス 朝" },
-    { k:"fpm", ok:"fpm_on", lb:"フォルテコールプラス 晩" },
+    { k:"fam", ok:"fam_on", lb:"DSピモハート 朝" },
+    { k:"fpm", ok:"fpm_on", lb:"DSピモハート 晩" },
     { k:"dam", ok:"dam_on", lb:"利尿剤 朝" },
     { k:"dpm", ok:"dpm_on", lb:"利尿剤 晩" },
   ];
-  const schedule = c => {
-    ntfRef.current.forEach(clearTimeout); ntfRef.current = [];
-    if (!("Notification" in window)) return;
-    Notification.requestPermission().then(p => {
-      if (p !== "granted") return;
-      ENTRIES.forEach(e => {
-        if (!c[e.ok] || !c[e.k]) return;
-        const [hh,mm] = c[e.k].split(":").map(Number);
-        const fire = new Date(); fire.setHours(hh,mm,0,0);
-        if (fire <= new Date()) fire.setDate(fire.getDate()+1);
-        ntfRef.current.push(setTimeout(() => new Notification("🐾 お薬リマインダー", { body: e.lb+"のお薬の時間です" }), fire-new Date()));
-      });
-    });
-  };
-  const save = () => { setDb(p => ({...p,ntf:cfg})); schedule(cfg); setMsg("通知設定を保存しました"); setTimeout(() => setMsg(""), 3000); };
+
   return (
     <div style={{ padding:12 }}>
+      {/* iPhone向け重要説明 */}
+      <Card>
+        <CH>📱 iPhoneで通知を受け取るには</CH>
+        <CB>
+          <div style={{ fontSize:12, color:th.tx, lineHeight:1.8 }}>
+            <div style={{ background:C.wnBg, border:`1px solid ${C.wnB}`, borderRadius:10, padding:"10px 12px", marginBottom:12, color:C.wnT, fontWeight:500 }}>
+              ⚠️ iPhoneのSafariでは通常ブラウザでは通知を受け取れません
+            </div>
+            <div style={{ fontWeight:500, marginBottom:6, color:th.tx }}>以下の手順でホーム画面に追加してください：</div>
+            <ol style={{ paddingLeft:18, color:th.sub }}>
+              <li>SafariでこのページのURLを開く</li>
+              <li>画面下の <b>共有ボタン（□↑）</b> をタップ</li>
+              <li><b>「ホーム画面に追加」</b> を選択して追加</li>
+              <li>ホーム画面のアイコンからアプリを起動</li>
+              <li>通知タブで <b>「通知を許可する」</b> をタップ</li>
+            </ol>
+            <div style={{ marginTop:10, fontSize:11, color:th.hint }}>
+              ※ iOS 16.4以降・Safari限定。ホーム画面追加後のアプリ起動中のみ通知が届きます。
+            </div>
+          </div>
+        </CB>
+      </Card>
+
       <Card>
         <CH>🔔 お薬リマインダー設定</CH>
         <CB>
-          <div style={{ fontSize:12, color:th.sub, marginBottom:12, padding:10,
-            background:th.c4, border:`1px solid ${th.bdr}`, borderRadius:10, lineHeight:1.6 }}>
-            通知は端末の通知許可が必要です。設定を保存すると、ページを開いている間は指定時刻に通知します。
-          </div>
+          {/* 通知権限状態バナー */}
+          {ntfSupport === "unsupported" && (
+            <div style={{ background:C.dnBg, border:`1px solid ${C.dnB}`, borderRadius:10, padding:"10px 12px", marginBottom:12, fontSize:12, color:C.dnT }}>
+              このブラウザは通知に対応していません
+            </div>
+          )}
+          {ntfSupport === "denied" && (
+            <div style={{ background:C.dnBg, border:`1px solid ${C.dnB}`, borderRadius:10, padding:"10px 12px", marginBottom:12, fontSize:12, color:C.dnT }}>
+              通知がブロックされています。端末の設定から許可してください
+            </div>
+          )}
+          {(ntfSupport === "prompt" || ntfSupport === "checking") && (
+            <button onClick={requestPerm}
+              style={{ width:"100%", background:C.c2, color:"#EBF4F6", border:"none", borderRadius:10,
+                padding:"12px", fontSize:14, fontWeight:500, cursor:"pointer", marginBottom:12 }}>
+              🔔 通知を許可する
+            </button>
+          )}
+          {ntfSupport === "granted" && (
+            <div style={{ background:C.sfBg, border:`1px solid ${C.sfT}`, borderRadius:10, padding:"8px 12px", marginBottom:12, fontSize:12, color:C.sfT }}>
+              ✓ 通知が許可されています
+            </div>
+          )}
+
           {ENTRIES.map(e => (
             <div key={e.k} style={{ display:"flex", alignItems:"center", justifyContent:"space-between",
               padding:"11px 0", borderBottom:`1px solid ${th.bdr}` }}>
@@ -709,7 +817,10 @@ function NtfPage({ db, setDb }) {
             </div>
           ))}
           <Btn save full onClick={save} style={{ marginTop:12 }}>通知設定を保存する</Btn>
-          {msg && <div style={{ fontSize:12, color:th.sub, textAlign:"center", marginTop:8 }}>{msg}</div>}
+          {msg && <div style={{ fontSize:12, color:C.sfT, textAlign:"center", marginTop:8, fontWeight:500 }}>{msg}</div>}
+          <div style={{ marginTop:10, fontSize:11, color:th.hint, lineHeight:1.6 }}>
+            ※ アプリを開いている間は30秒ごとに時刻をチェックして通知します。バックグラウンドでは届きません。
+          </div>
         </CB>
       </Card>
     </div>
