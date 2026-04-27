@@ -498,6 +498,9 @@ function HistPage({ db, setDb, dark }) {
   const dangerCt = srrAll.filter(r => r.srr >= 40).length;
   const del = idx => { if (!window.confirm("削除しますか？")) return; setDb(prev => { const recs=[...prev.recs]; recs.splice(idx,1); return {...prev,recs}; }); };
 
+  const [showReport, setShowReport] = useState(false);
+  const [reportHtml, setReportHtml] = useState("");
+
   const genReport = () => {
     const recs = db.recs.slice(0, 30), sr = recs.filter(r => r.srr != null);
     const avg  = sr.length ? Math.round(sr.reduce((a,r) => a+r.srr, 0)/sr.length) : "—";
@@ -505,35 +508,22 @@ function HistPage({ db, setDb, dark }) {
     const today = new Date().toLocaleDateString("ja-JP");
     const rows  = recs.map(r =>
       `<tr><td>${r.date}</td><td>${r.time}</td>` +
-      `<td class="${r.srr>=40?"dn":r.srr>=30?"wn":r.srr!=null?"sf":""}">${r.srr!=null?r.srr+"回/分":"—"}</td>` +
+      `<td class="${r.srr>=40?"dn":r.srr>=30?"wn":r.srr!=null?"sf":""}">${r.srr!=null?r.srr+"回/分":r.medEvent?"💊":""}</td>` +
       `<td>${r.water?r.water+"ml":"—"}</td><td>${r.uAmt||"—"}</td><td>${r.uCol||"—"}</td></tr>`
     ).join("");
-    const html = `<!DOCTYPE html><html lang="ja"><head><meta charset="UTF-8"><title>診察前レポート</title>
-<style>@page{size:A4;margin:20mm 15mm}@media print{.no-print{display:none}}
-body{font-family:"Hiragino Kaku Gothic ProN","Yu Gothic",sans-serif;padding:0;margin:0;color:#09637E;font-size:12px}
-.wrap{max-width:720px;margin:0 auto;padding:24px}h1{font-size:18px;border-bottom:2px solid #088395;padding-bottom:8px;margin-bottom:16px}
-.meta{font-size:11px;color:#7AB2B2;margin-bottom:16px}.stat-row{display:flex;gap:12px;margin-bottom:18px;flex-wrap:wrap}
-.stat{background:#EBF4F6;border:1px solid #A8CEDA;border-radius:8px;padding:10px 16px;text-align:center;min-width:100px}
-.stat .lb{font-size:10px;color:#7AB2B2;margin-bottom:4px}.stat .vl{font-size:20px;font-weight:600;color:#09637E}
-table{width:100%;border-collapse:collapse;font-size:11px}th{background:#09637E;color:#EBF4F6;padding:7px 8px;text-align:left}
-td{padding:6px 8px;border-bottom:1px solid #C2DDE2}.dn{color:#A32D2D;font-weight:600}.wn{color:#6B5200}.sf{color:#0F6E56}
-.print-btn{margin-bottom:16px;padding:10px 24px;background:#09637E;color:#EBF4F6;border:none;border-radius:8px;font-size:13px;cursor:pointer}
-footer{margin-top:24px;font-size:10px;color:#7AB2B2;border-top:1px solid #C2DDE2;padding-top:8px}
-</style></head><body><div class="wrap">
-<div class="no-print"><button class="print-btn" onclick="window.print()">🖨 PDFとして保存 / 印刷する</button></div>
-<h1>🐾 ロンの心臓病 診察前レポート</h1>
-<div class="meta">作成日：${today}　｜　病院：${db.hosp.name||"未設定"}　｜　総記録：${db.recs.length}件</div>
-<div class="stat-row">
-<div class="stat"><div class="lb">SRR 平均</div><div class="vl">${avg}回</div></div>
-<div class="stat"><div class="lb">SRR 最大値</div><div class="vl">${max}回</div></div>
-<div class="stat"><div class="lb">記録件数</div><div class="vl">${recs.length}件</div></div>
-</div>
-<table><tr><th>日付</th><th>時刻</th><th>SRR</th><th>飲水量</th><th>排尿量</th><th>排尿色</th></tr>${rows}</table>
-<footer>このレポートはロンの心臓病管理アプリが自動生成しました。印刷またはブラウザの「PDFとして保存」をご利用ください。</footer>
-</div></body></html>`;
-    const win = window.open("", "_blank", "width=800,height=900");
-    if (!win) { alert("ポップアップがブロックされました。ブラウザの設定でポップアップを許可してください。"); return; }
-    win.document.write(html); win.document.close();
+    setReportHtml(`
+      <h1 style="font-size:17px;border-bottom:2px solid #088395;padding-bottom:8px;margin-bottom:14px;color:#09637E">🐾 ロンの心臓病 診察前レポート</h1>
+      <p style="font-size:11px;color:#7AB2B2;margin-bottom:14px">作成日：${today}　｜　病院：${db.hosp.name||"未設定"}　｜　総記録：${db.recs.length}件</p>
+      <div style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap">
+        ${[["SRR 平均",avg+"回"],["SRR 最大",max+"回"],["記録件数",recs.length+"件"]].map(([l,v])=>`<div style="background:#EBF4F6;border:1px solid #A8CEDA;border-radius:8px;padding:10px 16px;text-align:center;min-width:80px"><div style="font-size:10px;color:#7AB2B2;margin-bottom:4px">${l}</div><div style="font-size:18px;font-weight:600;color:#09637E">${v}</div></div>`).join("")}
+      </div>
+      <table style="width:100%;border-collapse:collapse;font-size:11px">
+        <tr style="background:#09637E;color:#EBF4F6"><th style="padding:7px 8px;text-align:left">日付</th><th style="padding:7px 8px;text-align:left">時刻</th><th style="padding:7px 8px;text-align:left">SRR</th><th style="padding:7px 8px;text-align:left">飲水</th><th style="padding:7px 8px;text-align:left">排尿量</th><th style="padding:7px 8px;text-align:left">排尿色</th></tr>
+        ${rows}
+      </table>
+      <p style="margin-top:20px;font-size:10px;color:#7AB2B2;border-top:1px solid #C2DDE2;padding-top:8px">このレポートはロンの心臓病管理アプリが自動生成しました。</p>
+    `);
+    setShowReport(true);
   };
 
   const gc = dark ? "rgba(122,178,178,0.15)" : "rgba(9,99,126,0.08)";
@@ -541,9 +531,28 @@ footer{margin-top:24px;font-size:10px;color:#7AB2B2;border-top:1px solid #C2DDE2
 
   return (
     <div style={{ padding:12 }}>
+      {/* ── インアプリ PDFモーダル ── */}
+      {showReport && (
+        <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.6)", zIndex:200, display:"flex", flexDirection:"column" }}>
+          <div style={{ background:"#fff", flex:1, overflowY:"auto", padding:20,
+            fontFamily:'"Hiragino Kaku Gothic ProN","Yu Gothic",sans-serif', color:"#09637E" }}
+            dangerouslySetInnerHTML={{ __html: reportHtml }} />
+          <div style={{ background:C.c1, padding:"12px 16px", display:"flex", gap:10, flexShrink:0 }}>
+            <button onClick={() => setShowReport(false)}
+              style={{ flex:1, background:"rgba(235,244,246,.2)", border:"1px solid rgba(235,244,246,.4)",
+                borderRadius:12, padding:13, fontSize:14, fontWeight:500, color:"#EBF4F6",
+                cursor:"pointer", fontFamily:"inherit" }}>
+              ← アプリに戻る
+            </button>
+            <button onClick={() => window.print()}
+              style={{ flex:1, background:"#EBF4F6", border:"none", borderRadius:12, padding:13,
+                fontSize:14, fontWeight:500, color:C.c1, cursor:"pointer", fontFamily:"inherit" }}>
+              🖨 PDF保存 / 印刷
+            </button>
+          </div>
+        </div>
+      )}
       <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:8, marginBottom:12 }}>
-        {[
-          { lb:"SRR 平均", v:srrAvg!=null?srrAvg+"回":"—" },
           { lb:"SRR 最大", v:srrMax!=null?srrMax+"回":"—", d:srrMax>=40 },
           { lb:"危険回数", v:dangerCt+"回", d:dangerCt>0 },
         ].map(s => (
@@ -691,58 +700,98 @@ function HospPage({ db, setDb }) {
 // ── 通知ページ ────────────────────────────────────────────────────
 function NtfPage({ db, setDb }) {
   const th = useTh();
-  const [cfg, setCfg]     = useState({ ...db.ntf });
-  const [msg, setMsg]     = useState("");
-  const [ntfSupport, setNtfSupport] = useState("checking");
-  const pollRef = useRef(null);
+  const [cfg, setCfg]           = useState({ ...db.ntf });
+  const [msg, setMsg]           = useState("");
+  const [ntfSup, setNtfSup]     = useState("checking");
+  const [debugLog, setDebugLog] = useState([]);
+  const pollRef  = useRef(null);
   const firedRef = useRef(new Set());
 
-  // 通知サポートチェック
-  useEffect(() => {
-    if (!("Notification" in window)) { setNtfSupport("unsupported"); return; }
-    if (Notification.permission === "granted") setNtfSupport("granted");
-    else if (Notification.permission === "denied") setNtfSupport("denied");
-    else setNtfSupport("prompt");
+  const addLog = useCallback((text) => {
+    const ts = new Date().toLocaleTimeString("ja-JP", { hour:"2-digit", minute:"2-digit", second:"2-digit" });
+    setDebugLog(prev => [`[${ts}] ${text}`, ...prev].slice(0, 30));
   }, []);
 
-  const requestPerm = async () => {
-    const p = await Notification.requestPermission();
-    setNtfSupport(p === "granted" ? "granted" : p === "denied" ? "denied" : "prompt");
-  };
+  // マウント時に権限チェック
+  useEffect(() => {
+    if (!("Notification" in window)) { setNtfSup("unsupported"); return; }
+    setNtfSup(Notification.permission);
+  }, []);
 
-  // setInterval で毎分現在時刻をチェックして発火（PWA必須）
+  // ── ポーリング本体（10秒ごと） ──────────────────────────────────
   const startPolling = useCallback((c) => {
     if (pollRef.current) clearInterval(pollRef.current);
     firedRef.current = new Set();
+    addLog("ポーリング開始（10秒間隔）");
     pollRef.current = setInterval(() => {
-      if (Notification.permission !== "granted") return;
-      const now = new Date();
-      const hhmm = `${String(now.getHours()).padStart(2,"0")}:${String(now.getMinutes()).padStart(2,"0")}`;
+      if (Notification.permission !== "granted") {
+        addLog("通知未許可 — スキップ");
+        return;
+      }
+      const now    = new Date();
+      const hhmm   = `${String(now.getHours()).padStart(2,"0")}:${String(now.getMinutes()).padStart(2,"0")}`;
       const dayKey = now.toLocaleDateString("ja-JP");
-      const ENTRIES = [
+      const ETRS = [
         { k:"fam", ok:"fam_on", time:c.fam, lb:"DSピモハート 朝のお薬の時間です" },
         { k:"fpm", ok:"fpm_on", time:c.fpm, lb:"DSピモハート 晩のお薬の時間です" },
         { k:"dam", ok:"dam_on", time:c.dam, lb:"利尿剤 朝のお薬の時間です" },
         { k:"dpm", ok:"dpm_on", time:c.dpm, lb:"利尿剤 晩のお薬の時間です" },
       ];
-      ENTRIES.forEach(e => {
+      let matched = false;
+      ETRS.forEach(e => {
         if (!c[e.ok] || !e.time) return;
-        const fireKey = `${dayKey}-${e.k}`;
-        if (e.time === hhmm && !firedRef.current.has(fireKey)) {
-          firedRef.current.add(fireKey);
-          new Notification("🐾 お薬リマインダー", { body: e.lb, icon:"/icon-192.png" });
+        const fk = `${dayKey}-${e.k}`;
+        addLog(`確認: ${e.lb.slice(0,9)} 設定=${e.time} 現在=${hhmm}`);
+        if (e.time === hhmm && !firedRef.current.has(fk)) {
+          firedRef.current.add(fk);
+          matched = true;
+          try {
+            const n = new Notification("🐾 お薬リマインダー", {
+              body: e.lb, icon:"/icon-192.png", badge:"/icon-192.png", requireInteraction:true,
+            });
+            n.onerror = ev => addLog(`❌ 通知エラー: ${ev}`);
+            addLog(`✅ 発火: ${e.lb}`);
+          } catch(err) { addLog(`❌ 例外: ${err.message}`); }
         }
       });
-    }, 30000); // 30秒ごとにチェック
-  }, []);
+      if (!matched) addLog(`待機中 現在=${hhmm}`);
+    }, 10000);
+  }, [addLog]);
 
-  useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current); }, []);
+  // ── 許可済みならマウント時に自動ポーリング開始 ─────────────────
+  useEffect(() => {
+    if (Notification.permission === "granted") {
+      addLog("許可済み → 自動ポーリング開始");
+      startPolling(db.ntf);
+    }
+    return () => { if (pollRef.current) clearInterval(pollRef.current); };
+  }, []); // eslint-disable-line
+
+  const requestPerm = async () => {
+    addLog("許可リクエスト...");
+    const p = await Notification.requestPermission();
+    addLog(`結果: ${p}`);
+    setNtfSup(p);
+    if (p === "granted") startPolling(cfg);
+  };
+
+  const testNotif = () => {
+    if (Notification.permission !== "granted") { addLog("未許可 — テスト不可"); return; }
+    try {
+      const n = new Notification("🐾 テスト通知", {
+        body:"通知は正常に動作しています！", icon:"/icon-192.png", requireInteraction:true,
+      });
+      n.onerror = ev => addLog(`テストエラー: ${ev}`);
+      addLog("✅ テスト通知を送信");
+    } catch(err) { addLog(`❌ テスト例外: ${err.message}`); }
+  };
 
   const save = () => {
     setDb(p => ({ ...p, ntf:cfg }));
-    if (Notification.permission === "granted") startPolling(cfg);
-    setMsg("保存しました。通知は有効です。");
-    setTimeout(() => setMsg(""), 3000);
+    addLog("設定保存 → ポーリング再起動");
+    startPolling(cfg);
+    setMsg("保存しました");
+    setTimeout(() => setMsg(""), 2500);
   };
 
   const ENTRIES = [
@@ -752,55 +801,54 @@ function NtfPage({ db, setDb }) {
     { k:"dpm", ok:"dpm_on", lb:"利尿剤 晩" },
   ];
 
+  const pGranted = ntfSup === "granted";
+  const pDenied  = ntfSup === "denied";
+  const pPrompt  = !pGranted && !pDenied && ntfSup !== "unsupported";
+
   return (
     <div style={{ padding:12 }}>
-      {/* iPhone向け重要説明 */}
       <Card>
         <CH>📱 iPhoneで通知を受け取るには</CH>
         <CB>
-          <div style={{ fontSize:12, color:th.tx, lineHeight:1.8 }}>
-            <div style={{ background:C.wnBg, border:`1px solid ${C.wnB}`, borderRadius:10, padding:"10px 12px", marginBottom:12, color:C.wnT, fontWeight:500 }}>
-              ⚠️ iPhoneのSafariでは通常ブラウザでは通知を受け取れません
-            </div>
-            <div style={{ fontWeight:500, marginBottom:6, color:th.tx }}>以下の手順でホーム画面に追加してください：</div>
-            <ol style={{ paddingLeft:18, color:th.sub }}>
-              <li>SafariでこのページのURLを開く</li>
-              <li>画面下の <b>共有ボタン（□↑）</b> をタップ</li>
-              <li><b>「ホーム画面に追加」</b> を選択して追加</li>
-              <li>ホーム画面のアイコンからアプリを起動</li>
-              <li>通知タブで <b>「通知を許可する」</b> をタップ</li>
-            </ol>
-            <div style={{ marginTop:10, fontSize:11, color:th.hint }}>
-              ※ iOS 16.4以降・Safari限定。ホーム画面追加後のアプリ起動中のみ通知が届きます。
-            </div>
+          <div style={{ background:C.wnBg, border:`1px solid ${C.wnB}`, borderRadius:10, padding:"10px 12px", marginBottom:12, color:C.wnT, fontWeight:500, fontSize:12 }}>
+            ⚠️ iPhoneのSafariでは通常ブラウザでは通知を受け取れません
           </div>
+          <ol style={{ paddingLeft:18, fontSize:12, color:th.sub, lineHeight:2 }}>
+            <li>SafariでこのページのURLを開く</li>
+            <li>画面下の <b>共有ボタン（□↑）</b> をタップ</li>
+            <li><b>「ホーム画面に追加」</b> を選択して追加</li>
+            <li>ホーム画面のアイコンからアプリを起動</li>
+            <li>通知タブで <b>「通知を許可する」</b> をタップ</li>
+            <li><b>「テスト通知を送る」</b> で動作確認</li>
+          </ol>
+          <div style={{ marginTop:8, fontSize:11, color:th.hint }}>※ iOS 16.4以降・PWA（ホーム画面追加）限定</div>
         </CB>
       </Card>
 
       <Card>
         <CH>🔔 お薬リマインダー設定</CH>
         <CB>
-          {/* 通知権限状態バナー */}
-          {ntfSupport === "unsupported" && (
+          {ntfSup === "unsupported" && (
             <div style={{ background:C.dnBg, border:`1px solid ${C.dnB}`, borderRadius:10, padding:"10px 12px", marginBottom:12, fontSize:12, color:C.dnT }}>
-              このブラウザは通知に対応していません
+              このブラウザ（またはPWA以外のiPhone Safari）は通知未対応です
             </div>
           )}
-          {ntfSupport === "denied" && (
+          {pDenied && (
             <div style={{ background:C.dnBg, border:`1px solid ${C.dnB}`, borderRadius:10, padding:"10px 12px", marginBottom:12, fontSize:12, color:C.dnT }}>
-              通知がブロックされています。端末の設定から許可してください
+              通知がブロックされています。端末設定 → Safari → 通知 から許可してください
             </div>
           )}
-          {(ntfSupport === "prompt" || ntfSupport === "checking") && (
+          {pPrompt && (
             <button onClick={requestPerm}
               style={{ width:"100%", background:C.c2, color:"#EBF4F6", border:"none", borderRadius:10,
-                padding:"12px", fontSize:14, fontWeight:500, cursor:"pointer", marginBottom:12 }}>
+                padding:13, fontSize:14, fontWeight:500, cursor:"pointer", marginBottom:12, fontFamily:"inherit" }}>
               🔔 通知を許可する
             </button>
           )}
-          {ntfSupport === "granted" && (
-            <div style={{ background:C.sfBg, border:`1px solid ${C.sfT}`, borderRadius:10, padding:"8px 12px", marginBottom:12, fontSize:12, color:C.sfT }}>
-              ✓ 通知が許可されています
+          {pGranted && (
+            <div style={{ background:C.sfBg, border:`1px solid ${C.sfT}`, borderRadius:10,
+              padding:"8px 12px", marginBottom:12, fontSize:12, color:C.sfT }}>
+              ✓ 通知許可済み（10秒ごと監視中）
             </div>
           )}
 
@@ -809,18 +857,48 @@ function NtfPage({ db, setDb }) {
               padding:"11px 0", borderBottom:`1px solid ${th.bdr}` }}>
               <div>
                 <div style={{ fontSize:13, fontWeight:500, color:th.tx }}>{e.lb}</div>
-                <input type="time" value={cfg[e.k]} onChange={ev => setCfg(p => ({...p,[e.k]:ev.target.value}))}
+                <input type="time" value={cfg[e.k]} onChange={ev => setCfg(p => ({ ...p, [e.k]:ev.target.value }))}
                   style={{ marginTop:6, background:th.c4, border:`1.5px solid ${th.bdr}`, borderRadius:10,
                     padding:"6px 10px", fontSize:13, color:th.tx, fontFamily:"inherit", outline:"none", width:120 }} />
               </div>
-              <Toggle on={cfg[e.ok]} onClick={() => setCfg(p => ({...p,[e.ok]:!p[e.ok]}))} />
+              <Toggle on={cfg[e.ok]} onClick={() => setCfg(p => ({ ...p, [e.ok]:!p[e.ok] }))} />
             </div>
           ))}
-          <Btn save full onClick={save} style={{ marginTop:12 }}>通知設定を保存する</Btn>
+
+          <div style={{ display:"flex", gap:10, marginTop:12 }}>
+            <button onClick={save}
+              style={{ flex:2, background:C.c2, color:"#EBF4F6", border:"none", borderRadius:12,
+                padding:14, fontSize:14, fontWeight:500, cursor:"pointer", fontFamily:"inherit" }}>
+              保存する
+            </button>
+            <button onClick={testNotif} disabled={!pGranted}
+              style={{ flex:1, background:pGranted?C.sfBg:th.bBg,
+                border:`1px solid ${pGranted?"#1D9E75":th.bBdr}`,
+                color:pGranted?C.sfT:th.hint, borderRadius:12, padding:14,
+                fontSize:13, fontWeight:500, cursor:pGranted?"pointer":"default",
+                fontFamily:"inherit", opacity:pGranted?1:0.45 }}>
+              テスト
+            </button>
+          </div>
           {msg && <div style={{ fontSize:12, color:C.sfT, textAlign:"center", marginTop:8, fontWeight:500 }}>{msg}</div>}
           <div style={{ marginTop:10, fontSize:11, color:th.hint, lineHeight:1.6 }}>
-            ※ アプリを開いている間は30秒ごとに時刻をチェックして通知します。バックグラウンドでは届きません。
+            ※ アプリ（PWA）を開いている間のみ通知が届きます。バックグラウンドでは届きません。
           </div>
+        </CB>
+      </Card>
+
+      <Card>
+        <CH>🔍 デバッグログ（動作確認用）</CH>
+        <CB style={{ padding:10 }}>
+          {debugLog.length === 0
+            ? <div style={{ fontSize:11, color:th.hint, textAlign:"center", padding:"8px 0" }}>ログなし（通知タブを開くと記録開始）</div>
+            : debugLog.map((l, i) => (
+                <div key={i} style={{ fontSize:10, color:l.includes("✅")?"#0F6E56":l.includes("❌")?C.dnT:th.hint,
+                  padding:"2px 0", borderBottom:`1px solid ${th.bdr}`, fontFamily:"monospace" }}>
+                  {l}
+                </div>
+              ))
+          }
         </CB>
       </Card>
     </div>
