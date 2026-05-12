@@ -1,8 +1,6 @@
-// /api/subscribe.js  - Vercel Serverless Function
-// プッシュ購読情報を保存（Upstash Redis使用）+ テスト送信
-
-import { Redis } from '@upstash/redis';
-import webpush from 'web-push';
+// api/subscribe.js - Vercel Serverless Function (CommonJS)
+const { Redis } = require('@upstash/redis');
+const webpush   = require('web-push');
 
 const redis = new Redis({
   url:   process.env.UPSTASH_REDIS_REST_URL,
@@ -15,7 +13,7 @@ webpush.setVapidDetails(
   process.env.VAPID_PRIVATE_KEY
 );
 
-export default async function handler(req, res) {
+module.exports = async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -38,7 +36,7 @@ export default async function handler(req, res) {
     if (sendTest) {
       await webpush.sendNotification(subscription, JSON.stringify({
         title: '🐾 テスト通知',
-        body:  'ロンの心臓病管理アプリからのテスト通知です！バックグラウンドでも届いています。',
+        body:  'バックグラウンドでも届いています！',
         icon:  '/icon-192.png',
         tag:   'test',
       }));
@@ -49,4 +47,4 @@ export default async function handler(req, res) {
     console.error('subscribe error:', err);
     return res.status(500).json({ error: err.message });
   }
-}
+};
