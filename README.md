@@ -34,11 +34,16 @@ git push -u origin main
 2. Framework: **Vite** が自動検出されます
 3. **Deploy** をクリック
 
-### 3. Vercel KV（データベース）を追加
+### 3. Upstash Redis を追加（無料）
 
-1. Vercelダッシュボード → プロジェクト → **Storage** タブ
-2. **Create Database** → **KV（Redis）** を選択
-3. 作成すると `KV_REST_API_URL` と `KV_REST_API_TOKEN` が自動で環境変数に追加されます
+**Vercel KVは2024年12月に廃止されました。代わりにUpstash Redisを使います。**
+
+1. [upstash.com](https://upstash.com) にアクセス → **Start for free**（Googleアカウントで登録可）
+2. **Create Database** → 名前を入力（例: `ron-heart`）→ リージョン: **ap-northeast-1（東京）** → **Create**
+3. 作成後、**REST API** タブをクリック
+4. 表示される以下の2つの値をコピー：
+   - `UPSTASH_REDIS_REST_URL`（`https://xxxx.upstash.io` の形式）
+   - `UPSTASH_REDIS_REST_TOKEN`（長い文字列）
 
 ### 4. 環境変数を設定
 
@@ -46,10 +51,12 @@ Vercelダッシュボード → プロジェクト → **Settings** → **Enviro
 
 | 変数名 | 値 |
 |--------|-----|
-| `VAPID_PUBLIC_KEY` | `BDn76JrB79Gdb2DY38aHgitFm5lmQG4-6RiAj5Tky0KIeIEAUN4SbvY3IUxqDahbZk-UZhS_BZVcZbZwmb75ojU` |
-| `VAPID_PRIVATE_KEY` | `r1aQgjv5GWN6ySpAl9p-OMX72atZI5ovAb6gk23PDiE` |
+| `VAPID_PUBLIC_KEY` | `.env.example` に記載の値 |
+| `VAPID_PRIVATE_KEY` | `.env.example` に記載の値 |
 | `VAPID_CONTACT` | `mailto:あなたのメールアドレス` |
-| `CRON_SECRET` | 任意のランダム文字列（例: `abc123xyz`） |
+| `UPSTASH_REDIS_REST_URL` | Upstashダッシュボードの REST API タブから取得 |
+| `UPSTASH_REDIS_REST_TOKEN` | 同上 |
+| `CRON_SECRET` | 任意のランダム文字列 |
 
 設定後、**Redeploy** を実行してください。
 
