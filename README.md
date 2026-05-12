@@ -70,7 +70,49 @@ Vercelダッシュボード → プロジェクト → **Settings** → **Enviro
 
 ---
 
-## ローカル開発
+## トラブルシューティング：通知が届かない場合
+
+### ステップ1: 診断エンドポイントで確認
+
+デプロイ後にブラウザで以下にアクセス：
+
+```
+https://あなたのドメイン/api/debug
+```
+
+以下を確認してください：
+
+| 項目 | 正常な状態 |
+|------|-----------|
+| `VAPID_PUBLIC_KEY` | ✅ 設定済 |
+| `VAPID_PRIVATE_KEY` | ✅ 設定済 |
+| `UPSTASH_REDIS_REST_URL` | ✅ 設定済 |
+| `UPSTASH_REDIS_REST_TOKEN` | ✅ 設定済 |
+| `redis.status` | ✅ 接続OK |
+| `redis.totalKeys` | 1以上（購読済みの場合） |
+| `subscriptions[].schedules` | 時刻とenabledが正しいこと |
+
+### ステップ2: Cronが動いているか確認
+
+Vercelダッシュボード → プロジェクト → **Logs** タブ → Function: `/api/send-push` でフィルタ
+
+`[send-push] ▶ JST=HH:MM` のログが5分ごとに記録されているか確認。
+
+### ステップ3: よくある原因
+
+| 原因 | 対処 |
+|------|------|
+| 購読データがRedisにない | 通知タブで「プッシュ通知を有効にする」を再実行 |
+| スケジュールの時刻がズレている | 「保存する」を押して時刻を再送信 |
+| Cronが5分間隔のため最大5分遅れる | 仕様です（Vercel Hobbyプランの制限） |
+| iPhoneでPWAとして起動していない | Safari → 共有 → ホーム画面に追加 → アイコンから起動 |
+| Vercelにデプロイ後Redeployしていない | 環境変数設定後に必ずRedeployを実行 |
+
+### 確認後は /api/debug を削除
+
+`api/debug.js` は診断用です。動作確認後は削除してください。
+
+
 
 ```bash
 npm install

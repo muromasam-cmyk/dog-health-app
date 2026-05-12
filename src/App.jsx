@@ -551,6 +551,7 @@ function NtfPage({db,setDb}) {
       });
       addLog("サーバーに購読情報を送信中...");
       const schedules=buildSchedules(cfg);
+      addLog(`スケジュール: ${JSON.stringify(schedules.filter(s=>s.enabled).map(s=>s.label+"="+s.time))}`);
       const res=await fetch("/api/subscribe",{
         method:"POST",
         headers:{"Content-Type":"application/json"},
