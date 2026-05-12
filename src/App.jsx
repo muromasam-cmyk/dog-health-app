@@ -497,115 +497,171 @@ function HospPage({db,setDb}) {
   );
 }
 
-// ── 通知ページ ────────────────────────────────────────────────────
+// ── 通知ページ（Web Push版） ──────────────────────────────────────
+const VAPID_PUBLIC = "BDn76JrB79Gdb2DY38aHgitFm5lmQG4-6RiAj5Tky0KIeIEAUN4SbvY3IUxqDahbZk-UZhS_BZVcZbZwmb75ojU";
+
+function urlBase64ToUint8Array(base64String) {
+  const padding = '='.repeat((4 - base64String.length % 4) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const raw = atob(base64);
+  return Uint8Array.from([...raw].map(c => c.charCodeAt(0)));
+}
+
 function NtfPage({db,setDb}) {
   const th=useTh();
   const [cfg,setCfg]=useState({...db.ntf}),[msg,setMsg]=useState("");
-  const [ntfSup,setNtfSup]=useState("checking"),[debugLog,setDebugLog]=useState([]);
-  const pollRef=useRef(null),firedRef=useRef(new Set());
+  const [status,setStatus]=useState("checking");
+  const [debugLog,setDebugLog]=useState([]);
 
   const addLog=useCallback(text=>{
     const ts=new Date().toLocaleTimeString("ja-JP",{hour:"2-digit",minute:"2-digit",second:"2-digit"});
-    setDebugLog(prev=>[`[${ts}] ${text}`,...prev].slice(0,30));
+    setDebugLog(prev=>[`[${ts}] ${text}`,...prev].slice(0,40));
   },[]);
 
+  // 現在の購読状態チェック
   useEffect(()=>{
-    if(!("Notification" in window)){setNtfSup("unsupported");return;}
-    setNtfSup(Notification.permission);
+    (async()=>{
+      if(!("Notification" in window)){setStatus("unsupported");return;}
+      if(!("serviceWorker" in navigator)){setStatus("no-sw");return;}
+      const perm=Notification.permission;
+      if(perm==="denied"){setStatus("denied");return;}
+      const reg=await navigator.serviceWorker.ready.catch(()=>null);
+      if(!reg){setStatus("no-sw");return;}
+      const existing=await reg.pushManager.getSubscription().catch(()=>null);
+      if(existing){setStatus("subscribed");addLog("✅ 購読済み: "+existing.endpoint.slice(0,40)+"...");}
+      else if(perm==="granted"){setStatus("granted");}
+      else{setStatus("prompt");}
+    })();
   },[]);
 
-  const startPolling=useCallback(c=>{
-    if(pollRef.current)clearInterval(pollRef.current);
-    firedRef.current=new Set();
-    addLog("ポーリング開始（10秒間隔）");
-    pollRef.current=setInterval(()=>{
-      if(Notification.permission!=="granted"){addLog("通知未許可 — スキップ");return;}
-      const now=new Date();
-      const hhmm=`${String(now.getHours()).padStart(2,"0")}:${String(now.getMinutes()).padStart(2,"0")}`;
-      const dayKey=now.toLocaleDateString("ja-JP");
-      const ETRS=[
-        {k:"fam",ok:"fam_on",time:c.fam,lb:"DSピモハート 朝のお薬の時間です"},
-        {k:"fpm",ok:"fpm_on",time:c.fpm,lb:"DSピモハート 晩のお薬の時間です"},
-        {k:"dam",ok:"dam_on",time:c.dam,lb:"利尿剤 朝のお薬の時間です"},
-        {k:"dpm",ok:"dpm_on",time:c.dpm,lb:"利尿剤 晩のお薬の時間です"},
-      ];
-      let matched=false;
-      ETRS.forEach(e=>{
-        if(!c[e.ok]||!e.time)return;
-        const fk=`${dayKey}-${e.k}`;
-        addLog(`確認: ${e.lb.slice(0,9)} 設定=${e.time} 現在=${hhmm}`);
-        if(e.time===hhmm&&!firedRef.current.has(fk)){
-          firedRef.current.add(fk);matched=true;
-          try{
-            const n=new Notification("🐾 お薬リマインダー",{body:e.lb,icon:"/icon-192.png",badge:"/icon-192.png",requireInteraction:true});
-            n.onerror=ev=>addLog(`❌ 通知エラー: ${ev}`);
-            addLog(`✅ 発火: ${e.lb}`);
-          }catch(err){addLog(`❌ 例外: ${err.message}`);}
-        }
-      });
-      if(!matched)addLog(`待機中 現在=${hhmm}`);
-    },10000);
-  },[addLog]);
-
-  useEffect(()=>{
-    if(Notification.permission==="granted"){addLog("許可済み → 自動ポーリング開始");startPolling(db.ntf);}
-    return()=>{if(pollRef.current)clearInterval(pollRef.current);};
-  },[]); // eslint-disable-line
-
-  const requestPerm=async()=>{
-    addLog("許可リクエスト...");
-    const p=await Notification.requestPermission();
-    addLog(`結果: ${p}`);setNtfSup(p);
-    if(p==="granted")startPolling(cfg);
-  };
-
-  const testNotif=()=>{
-    if(Notification.permission!=="granted"){addLog("未許可 — テスト不可");return;}
+  // Web Push 購読を作成してサーバーに送信
+  const subscribe=async()=>{
     try{
-      const n=new Notification("🐾 テスト通知",{body:"通知は正常に動作しています！",icon:"/icon-192.png",requireInteraction:true});
-      n.onerror=ev=>addLog(`テストエラー: ${ev}`);
-      addLog("✅ テスト通知を送信");
-    }catch(err){addLog(`❌ テスト例外: ${err.message}`);}
+      addLog("Service Worker 登録中...");
+      const reg=await navigator.serviceWorker.register("/sw.js");
+      await navigator.serviceWorker.ready;
+      addLog("通知許可リクエスト...");
+      const perm=await Notification.requestPermission();
+      addLog(`許可結果: ${perm}`);
+      if(perm!=="granted"){setStatus("denied");return;}
+      addLog("プッシュ購読を作成中...");
+      const sub=await reg.pushManager.subscribe({
+        userVisibleOnly:true,
+        applicationServerKey:urlBase64ToUint8Array(VAPID_PUBLIC),
+      });
+      addLog("サーバーに購読情報を送信中...");
+      const schedules=buildSchedules(cfg);
+      const res=await fetch("/api/subscribe",{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({subscription:sub.toJSON(),schedules,deviceId:navigator.userAgent.slice(0,50)}),
+      });
+      if(!res.ok){const e=await res.text();throw new Error(`Server ${res.status}: ${e}`);}
+      const data=await res.json();
+      addLog(`✅ 登録完了 key=${data.key}`);
+      setStatus("subscribed");
+      setMsg("プッシュ通知の設定が完了しました！");
+      setTimeout(()=>setMsg(""),3000);
+    }catch(err){
+      addLog(`❌ エラー: ${err.message}`);
+      setStatus("error");
+    }
   };
 
-  const save=()=>{
-    setDb(p=>({...p,ntf:cfg}));addLog("設定保存 → ポーリング再起動");startPolling(cfg);
+  const buildSchedules=(c)=>[
+    {label:"DSピモハート 朝",time:c.fam,enabled:c.fam_on},
+    {label:"DSピモハート 晩",time:c.fpm,enabled:c.fpm_on},
+    {label:"利尿剤 朝",     time:c.dam,enabled:c.dam_on},
+    {label:"利尿剤 晩",     time:c.dpm,enabled:c.dpm_on},
+  ];
+
+  // 設定を更新（購読済みなら再送信）
+  const save=async()=>{
+    setDb(p=>({...p,ntf:cfg}));
+    addLog("設定を保存中...");
+    if(status==="subscribed"){
+      try{
+        const reg=await navigator.serviceWorker.ready;
+        const sub=await reg.pushManager.getSubscription();
+        if(sub){
+          const res=await fetch("/api/subscribe",{
+            method:"POST",
+            headers:{"Content-Type":"application/json"},
+            body:JSON.stringify({subscription:sub.toJSON(),schedules:buildSchedules(cfg),deviceId:navigator.userAgent.slice(0,50)}),
+          });
+          if(res.ok){addLog("✅ サーバーのスケジュールを更新しました");}
+          else{addLog(`⚠ サーバー更新失敗: ${res.status}`);}
+        }
+      }catch(err){addLog(`❌ 更新エラー: ${err.message}`);}
+    }
     setMsg("保存しました");setTimeout(()=>setMsg(""),2500);
   };
 
+  // テスト通知（即時送信）
+  const testNotif=async()=>{
+    if(status!=="subscribed"){addLog("未購読 — テスト不可");return;}
+    try{
+      const reg=await navigator.serviceWorker.ready;
+      const sub=await reg.pushManager.getSubscription();
+      if(!sub){addLog("購読が見つかりません");return;}
+      addLog("テスト通知を送信中...");
+      const res=await fetch("/api/subscribe",{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({
+          subscription:sub.toJSON(),
+          schedules:buildSchedules(cfg),
+          deviceId:navigator.userAgent.slice(0,50),
+          sendTest:true,
+        }),
+      });
+      if(res.ok){addLog("✅ テスト通知を送信しました");}
+      else{addLog(`❌ テスト失敗: ${res.status}`);}
+    }catch(err){addLog(`❌ テストエラー: ${err.message}`);}
+  };
+
   const ENTRIES=[
-    {k:"fam",ok:"fam_on",lb:"DSピモハート 朝"},{k:"fpm",ok:"fpm_on",lb:"DSピモハート 晩"},
-    {k:"dam",ok:"dam_on",lb:"利尿剤 朝"},{k:"dpm",ok:"dpm_on",lb:"利尿剤 晩"},
+    {k:"fam",ok:"fam_on",lb:"DSピモハート 朝"},
+    {k:"fpm",ok:"fpm_on",lb:"DSピモハート 晩"},
+    {k:"dam",ok:"dam_on",lb:"利尿剤 朝"},
+    {k:"dpm",ok:"dpm_on",lb:"利尿剤 晩"},
   ];
-  const pGranted=ntfSup==="granted",pDenied=ntfSup==="denied";
-  const pPrompt=!pGranted&&!pDenied&&ntfSup!=="unsupported";
 
   return (
     <div style={{padding:12}}>
       <Card>
-        <CH>📱 iPhoneで通知を受け取るには</CH>
+        <CH>📱 バックグラウンド通知（Web Push）</CH>
         <CB>
-          <div style={{background:C.wnBg,border:`1px solid ${C.wnB}`,borderRadius:10,padding:"10px 12px",marginBottom:12,color:C.wnT,fontWeight:500,fontSize:12}}>
-            ⚠️ iPhoneのSafariでは通常ブラウザでは通知を受け取れません
+          <div style={{fontSize:12,color:th.tx,lineHeight:1.8,marginBottom:10}}>
+            <b style={{color:C.c1}}>アプリを完全に閉じていても</b>通知が届きます。
           </div>
-          <ol style={{paddingLeft:18,fontSize:12,color:th.sub,lineHeight:2}}>
-            <li>SafariでこのページのURLを開く</li>
-            <li>画面下の <b>共有ボタン（□↑）</b> をタップ</li>
-            <li><b>「ホーム画面に追加」</b> を選択して追加</li>
-            <li>ホーム画面のアイコンからアプリを起動</li>
-            <li>通知タブで <b>「通知を許可する」</b> をタップ</li>
-            <li><b>「テスト」ボタン</b> で動作確認</li>
-          </ol>
-          <div style={{marginTop:8,fontSize:11,color:th.hint}}>※ iOS 16.4以降・PWA（ホーム画面追加）限定</div>
+          {status==="unsupported"&&<div style={{background:C.dnBg,border:`1px solid ${C.dnB}`,borderRadius:10,padding:"10px 12px",marginBottom:12,fontSize:12,color:C.dnT}}>このブラウザはWeb Pushに対応していません</div>}
+          {status==="no-sw"&&<div style={{background:C.dnBg,border:`1px solid ${C.dnB}`,borderRadius:10,padding:"10px 12px",marginBottom:12,fontSize:12,color:C.dnT}}>Service Worker が利用できません（HTTPS環境でお試しください）</div>}
+          {status==="denied"&&<div style={{background:C.dnBg,border:`1px solid ${C.dnB}`,borderRadius:10,padding:"10px 12px",marginBottom:12,fontSize:12,color:C.dnT}}>通知がブロックされています。端末設定 → Safari → 通知 から許可してください</div>}
+          {(status==="prompt"||status==="granted"||status==="checking")&&(
+            <button onClick={subscribe} style={{width:"100%",background:C.c2,color:"#EBF4F6",border:"none",borderRadius:12,padding:14,fontSize:15,fontWeight:500,cursor:"pointer",marginBottom:12,fontFamily:"inherit"}}>
+              🔔 プッシュ通知を有効にする
+            </button>
+          )}
+          {status==="error"&&(
+            <button onClick={subscribe} style={{width:"100%",background:C.dnB,color:"#EBF4F6",border:"none",borderRadius:12,padding:14,fontSize:14,fontWeight:500,cursor:"pointer",marginBottom:12,fontFamily:"inherit"}}>
+              ❌ エラー — もう一度試す
+            </button>
+          )}
+          {status==="subscribed"&&(
+            <div style={{background:C.sfBg,border:`1px solid ${C.sfT}`,borderRadius:10,padding:"10px 12px",marginBottom:12,fontSize:12,color:C.sfT,fontWeight:500}}>
+              ✅ プッシュ通知が有効です（バックグラウンドでも届きます）
+            </div>
+          )}
+          <div style={{background:C.wnBg,border:`1px solid ${C.wnB}`,borderRadius:10,padding:"10px 12px",marginBottom:12,fontSize:11,color:C.wnT}}>
+            <b>iPhoneをご利用の方：</b> Safari → 共有（□↑）→「ホーム画面に追加」→ ホーム画面から起動してから有効化してください（iOS 16.4以降）
+          </div>
         </CB>
       </Card>
+
       <Card>
-        <CH>🔔 お薬リマインダー設定</CH>
+        <CH>🔔 通知時刻の設定</CH>
         <CB>
-          {ntfSup==="unsupported"&&<div style={{background:C.dnBg,border:`1px solid ${C.dnB}`,borderRadius:10,padding:"10px 12px",marginBottom:12,fontSize:12,color:C.dnT}}>このブラウザ（またはPWA以外のiPhone Safari）は通知未対応です</div>}
-          {pDenied&&<div style={{background:C.dnBg,border:`1px solid ${C.dnB}`,borderRadius:10,padding:"10px 12px",marginBottom:12,fontSize:12,color:C.dnT}}>通知がブロックされています。端末設定 → Safari → 通知 から許可してください</div>}
-          {pPrompt&&<button onClick={requestPerm} style={{width:"100%",background:C.c2,color:"#EBF4F6",border:"none",borderRadius:10,padding:13,fontSize:14,fontWeight:500,cursor:"pointer",marginBottom:12,fontFamily:"inherit"}}>🔔 通知を許可する</button>}
-          {pGranted&&<div style={{background:C.sfBg,border:`1px solid ${C.sfT}`,borderRadius:10,padding:"8px 12px",marginBottom:12,fontSize:12,color:C.sfT}}>✓ 通知許可済み（10秒ごと監視中）</div>}
           {ENTRIES.map(e=>(
             <div key={e.k} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"11px 0",borderBottom:`1px solid ${th.bdr}`}}>
               <div>
@@ -617,18 +673,23 @@ function NtfPage({db,setDb}) {
             </div>
           ))}
           <div style={{display:"flex",gap:10,marginTop:12}}>
-            <button onClick={save} style={{flex:2,background:C.c2,color:"#EBF4F6",border:"none",borderRadius:12,padding:14,fontSize:14,fontWeight:500,cursor:"pointer",fontFamily:"inherit"}}>保存する</button>
-            <button onClick={testNotif} disabled={!pGranted} style={{flex:1,background:pGranted?C.sfBg:th.bBg,border:`1px solid ${pGranted?"#1D9E75":th.bBdr}`,color:pGranted?C.sfT:th.hint,borderRadius:12,padding:14,fontSize:13,fontWeight:500,cursor:pGranted?"pointer":"default",fontFamily:"inherit",opacity:pGranted?1:0.45}}>テスト</button>
+            <button onClick={save} style={{flex:2,background:C.c2,color:"#EBF4F6",border:"none",borderRadius:12,padding:14,fontSize:14,fontWeight:500,cursor:"pointer",fontFamily:"inherit"}}>
+              保存する
+            </button>
+            <button onClick={testNotif} disabled={status!=="subscribed"}
+              style={{flex:1,background:status==="subscribed"?C.sfBg:th.bBg,border:`1px solid ${status==="subscribed"?"#1D9E75":th.bBdr}`,color:status==="subscribed"?C.sfT:th.hint,borderRadius:12,padding:14,fontSize:13,fontWeight:500,cursor:status==="subscribed"?"pointer":"default",fontFamily:"inherit",opacity:status==="subscribed"?1:0.45}}>
+              テスト
+            </button>
           </div>
           {msg&&<div style={{fontSize:12,color:C.sfT,textAlign:"center",marginTop:8,fontWeight:500}}>{msg}</div>}
-          <div style={{marginTop:10,fontSize:11,color:th.hint,lineHeight:1.6}}>※ アプリ（PWA）を開いている間のみ通知が届きます。バックグラウンドでは届きません。</div>
         </CB>
       </Card>
+
       <Card>
-        <CH>🔍 デバッグログ（動作確認用）</CH>
+        <CH>🔍 デバッグログ</CH>
         <CB style={{padding:10}}>
           {debugLog.length===0
-            ?<div style={{fontSize:11,color:th.hint,textAlign:"center",padding:"8px 0"}}>ログなし（通知タブを開くと記録開始）</div>
+            ?<div style={{fontSize:11,color:th.hint,textAlign:"center",padding:"8px 0"}}>ログなし</div>
             :debugLog.map((l,i)=>(
               <div key={i} style={{fontSize:10,color:l.includes("✅")?"#0F6E56":l.includes("❌")?C.dnT:th.hint,padding:"2px 0",borderBottom:`1px solid ${th.bdr}`,fontFamily:"monospace"}}>{l}</div>
             ))
